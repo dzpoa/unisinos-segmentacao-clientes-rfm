@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -17,7 +18,7 @@ def carregar_dados(caminho="data/rfm_clusters.csv"):
 df = carregar_dados()
 
 st.title("Segmentação de Clientes — RFM")
-st.caption("UNISINOS · Aprendizado Não Supervisionado · UCI Online Retail Dataset")
+st.caption("UNISINOS · Aprendizado Não Supervisionado · UCI Online Retail Dataset · valores em libras (£), receita líquida de devoluções")
 
 segmentos_disponiveis = sorted(df["segmento"].unique())
 cor_por_segmento = {seg: PALETA[i % len(PALETA)] for i, seg in enumerate(segmentos_disponiveis)}
@@ -26,7 +27,7 @@ df_filtrado = df
 # --- KPIs ---
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Clientes", f"{len(df_filtrado):,}")
-col2.metric("Receita total", f"R$ {df_filtrado['Monetary'].sum():,.0f}")
+col2.metric("Receita líquida total", f"£ {df_filtrado['Monetary'].sum():,.0f}")
 col3.metric("Segmentos", len(segmentos_disponiveis))
 col4.metric("Segmento de maior receita", df.groupby("segmento")["Monetary"].sum().idxmax())
 
@@ -43,7 +44,7 @@ with c1:
         labels={"PC1": "PC1", "PC2": "PC2"},
     )
     fig_scatter.update_layout(legend_title_text="Segmento")
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(fig_scatter, width="stretch")
 
 with c2:
     receita_segmento = df_filtrado.groupby("segmento")["Monetary"].sum().reset_index()
@@ -52,25 +53,29 @@ with c2:
         color="segmento", color_discrete_map=cor_por_segmento,
         title="Contribuição de receita",
     )
-    st.plotly_chart(fig_pizza, use_container_width=True)
+    st.plotly_chart(fig_pizza, width="stretch")
 
 # --- linha 2: radar + barras ---
 c3, c4 = st.columns(2)
 
 with c3:
-    perfil = df_filtrado.groupby("segmento")[FEATURES].median()
-    perfil_norm = (perfil - perfil.min()) / (perfil.max() - perfil.min() + 1e-9)
+    # mesma normalização do notebook: min-max em espaço log1p, com Recency invertida
+    # para que "mais para fora" signifique "melhor" nos três eixos
+    perfil_log = np.log1p(df_filtrado.groupby("segmento")[FEATURES].median())
+    perfil_norm = (perfil_log - perfil_log.min()) / (perfil_log.max() - perfil_log.min() + 1e-9)
+    perfil_norm["Recency"] = 1 - perfil_norm["Recency"]
+    eixos = ["Recency (invertida)", "Frequency", "Monetary"]
     fig_radar = go.Figure()
     for seg in perfil_norm.index:
         fig_radar.add_trace(go.Scatterpolar(
-            r=perfil_norm.loc[seg].values, theta=FEATURES, fill="toself",
+            r=perfil_norm.loc[seg].values, theta=eixos, fill="toself",
             name=seg, line_color=cor_por_segmento.get(seg),
         ))
     fig_radar.update_layout(
-        title="Perfil normalizado por segmento (mediana de R, F, M)",
+        title="Perfil normalizado por segmento (mais para fora = melhor)",
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
     )
-    st.plotly_chart(fig_radar, use_container_width=True)
+    st.plotly_chart(fig_radar, width="stretch")
 
 with c4:
     contagem = df_filtrado["segmento"].value_counts().reset_index()
@@ -80,7 +85,7 @@ with c4:
         color_discrete_map=cor_por_segmento, title="Clientes por segmento",
     )
     fig_bar.update_layout(showlegend=False)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
 # --- linha 3: boxplot + tabela ---
 c5, c6 = st.columns([1, 1])
@@ -89,10 +94,10 @@ with c5:
     fig_box = px.box(
         df_filtrado, x="segmento", y="Monetary", color="segmento",
         color_discrete_map=cor_por_segmento, log_y=True,
-        title="Distribuição de Monetary por segmento (log)",
+        title="Distribuição de Monetary líquido por segmento (£, log)",
     )
     fig_box.update_layout(showlegend=False)
-    st.plotly_chart(fig_box, use_container_width=True)
+    st.plotly_chart(fig_box, width="stretch")
 
 with c6:
     st.subheader("Perfil por segmento")
@@ -100,11 +105,11 @@ with c6:
         clientes=("CustomerID", "count"),
         recency_mediana=("Recency", "median"),
         frequency_mediana=("Frequency", "median"),
-        monetary_mediana=("Monetary", "median"),
-        receita_total=("Monetary", "sum"),
+        monetary_mediana_gbp=("Monetary", "median"),
+        receita_total_gbp=("Monetary", "sum"),
     ).round(1)
-    tabela["receita_%"] = (tabela["receita_total"] / tabela["receita_total"].sum() * 100).round(1)
-    st.dataframe(tabela, use_container_width=True)
+    tabela["receita_%"] = (tabela["receita_total_gbp"] / tabela["receita_total_gbp"].sum() * 100).round(1)
+    st.dataframe(tabela, width="stretch")
 
 st.divider()
 st.caption("Dashboard gerado a partir da segmentação K-Means (RFM). Gráficos são interativos — use zoom, hover e clique na legenda para isolar segmentos.")
